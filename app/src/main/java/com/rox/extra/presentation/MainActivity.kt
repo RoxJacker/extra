@@ -27,8 +27,8 @@ import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
 import androidx.wear.tooling.preview.devices.WearDevices
-import com.example.extra.R
-import com.example.extra.presentation.theme.ExtraTheme
+import com.rox.extra.R
+import com.rox.extra.presentation.theme.ExtraTheme
 import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.CapabilityInfo
 import com.google.android.gms.wearable.DataClient
@@ -36,7 +36,6 @@ import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.MessageClient
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
-import java.util.jar.Manifest
 
 class MainActivity : ComponentActivity(),
     SensorEventListener,
