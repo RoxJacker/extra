@@ -9,15 +9,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -50,25 +47,25 @@ class MainActivity : ComponentActivity(),
 
     var activityContext: Context?=null
 
-    // Estado para mostrar en la UI
-    var datosRecibidos by mutableStateOf("Esperando datos...")
-        private set
+    // Estado para mostrar los datos recibidos
+    private var receivedMessage = mutableStateOf("Esperando datos del smartwatch...")
+    private var isConnected = mutableStateOf(false)
 
-    var statusMessage by mutableStateOf("Presiona CONECTAR para iniciar")
-        private set
-
-    var nodeID: String = ""
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         activityContext=this
+
         enableEdgeToEdge()
         setContent {
             ExtraTheme {
-                PhoneApp(
-                    onConnect = { getNodes(activityContext!!) },
-                    datosRecibidos = datosRecibidos,
-                    statusMessage = statusMessage
-                )
+                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                    PhoneScreen(
+                        receivedMessage = receivedMessage.value,
+                        isConnected = isConnected.value,
+                        onConnect = { getNodes(this) },
+                        modifier = Modifier.padding(innerPadding)
+                    )
+                }
             }
         }
     }
@@ -79,24 +76,19 @@ class MainActivity : ComponentActivity(),
                 val nodes = Tasks.await(nodeList)
                 if (nodes.isNotEmpty()) {
                     for (node in nodes) {
-                        nodeID = node.id
-                        launch(Dispatchers.Main) {
-                            statusMessage = "Conectado con: ${node.displayName}"
-                        }
                         Log.d("NODO", node.toString())
                         Log.d("NODO", "El id del nodo es: ${node.id}")
                     }
+                    isConnected.value = true
+                    receivedMessage.value = "Conectado con ${nodes.size} dispositivo(s)"
                 } else {
-                    launch(Dispatchers.Main) {
-                        statusMessage = "No se encontró smartwatch"
-                    }
-                    Log.d("NODO", "No se encontraron nodos")
+                    isConnected.value = false
+                    receivedMessage.value = "No se encontraron dispositivos conectados"
                 }
             } catch (exception: Exception) {
-                launch(Dispatchers.Main) {
-                    statusMessage = "Error al conectar"
-                }
                 Log.d("Error al obtener nodos", exception.toString())
+                isConnected.value = false
+                receivedMessage.value = "Error al conectar: ${exception.message}"
             }
         }
     }
@@ -135,9 +127,8 @@ class MainActivity : ComponentActivity(),
         val message= String(ME.data, StandardCharsets.UTF_8)
         Log.d("onMessageReceived", "Mensaje: ${message}")
 
-        // Actualizar UI con los datos recibidos
-        datosRecibidos = message
-        statusMessage = "Datos recibidos correctamente"
+        // Actualizar la UI con el mensaje recibido
+        receivedMessage.value = "Último dato recibido:\n$message"
     }
 
     override fun onCapabilityChanged(p0: CapabilityInfo) {
@@ -146,95 +137,78 @@ class MainActivity : ComponentActivity(),
 }
 
 @Composable
-fun PhoneApp(
+fun PhoneScreen(
+    receivedMessage: String,
+    isConnected: Boolean,
     onConnect: () -> Unit,
-    datosRecibidos: String,
-    statusMessage: String
+    modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Column(
+        // Título
+        Text(
+            text = "Monitor de Ritmo Cardíaco",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(bottom = 32.dp)
+        )
+
+        // Botón Conectar
+        Button(
+            onClick = onConnect,
             modifier = Modifier
-                .fillMaxSize()
-                .padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .fillMaxWidth()
+                .padding(bottom = 24.dp)
         ) {
-            // Título
             Text(
-                text = "Control Smartwatch",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
+                text = if (isConnected) "Reconectar" else "Conectar",
+                fontSize = 18.sp
             )
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Botón CONECTAR
-            Button(
-                onClick = onConnect,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-            ) {
-                Text(
-                    text = "CONECTAR",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Mensaje de estado
-            Text(
-                text = statusMessage,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.secondary,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(48.dp))
-
-            // Label "DATOS RECIBIDOS"
-            Text(
-                text = "DATOS RECIBIDOS",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Mostrar datos recibidos
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = MaterialTheme.shapes.medium
-            ) {
-                Text(
-                    text = datosRecibidos,
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(32.dp)
-                )
-            }
         }
+
+        // TextView para mostrar datos recibidos
+        Text(
+            text = receivedMessage,
+            fontSize = 32.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (receivedMessage.contains("BPM:"))
+                MaterialTheme.colorScheme.primary
+            else
+                MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        )
+
+        // Estado de conexión
+        Text(
+            text = if (isConnected) "● Conectado" else "○ Desconectado",
+            fontSize = 14.sp,
+            color = if (isConnected)
+                MaterialTheme.colorScheme.primary
+            else
+                MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 16.dp)
+        )
     }
 }
 
 @Preview(showBackground = true)
 @Composable
-fun PhoneAppPreview() {
+fun PhoneScreenPreview() {
     ExtraTheme {
-        PhoneApp(
-            onConnect = {},
-            datosRecibidos = "25.43",
-            statusMessage = "Conectado con: Galaxy Watch"
+        PhoneScreen(
+            receivedMessage = "Último dato recibido:\nBPM:75",
+            isConnected = true,
+            onConnect = {}
         )
     }
 }
