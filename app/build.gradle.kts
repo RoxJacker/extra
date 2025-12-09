@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "com.rox.extra"
-    compileSdk = 36
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.rox.extra"
-        minSdk = 34
-        targetSdk = 36
+        minSdk = 30
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
 
