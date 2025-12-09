@@ -11,6 +11,8 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -37,16 +39,12 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 import androidx.wear.compose.material.Button
 import androidx.wear.compose.material.ButtonDefaults
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
 import androidx.wear.tooling.preview.devices.WearDevices
-import com.rox.extra.R
 import com.rox.extra.presentation.theme.ExtraTheme
 import com.google.android.gms.tasks.Tasks
 import com.google.android.gms.wearable.CapabilityClient
@@ -60,59 +58,53 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity(),
     CoroutineScope by MainScope(),
     SensorEventListener,
     DataClient.OnDataChangedListener,
     MessageClient.OnMessageReceivedListener,
-    CapabilityClient.OnCapabilityChangedListener{
+    CapabilityClient.OnCapabilityChangedListener {
 
-    var activityContext: Context?=null
+    var activityContext: Context? = null
 
     private lateinit var sensorManager: SensorManager
-    private var sensor: Sensor?=null
-    private var sensorType=Sensor.TYPE_HEART_RATE
+    private var sensor: Sensor? = null
+    private var sensorType = Sensor.TYPE_HEART_RATE
 
     var nodeID: String = ""
     private var PAYLOAD: String = "/heart_rate_data"
 
-    // Lectura temporal del sensor (no se muestra hasta presionar Enviar)
     private var currentSensorReading = 0
-
-    // Valor mostrado en la UI (solo se actualiza al presionar Enviar)
     private val displayedHeartRate = mutableStateOf(0)
-
-    // Estado del sensor
     private val sensorActive = mutableStateOf(false)
 
-    // Launcher moderno para solicitar permisos
     private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            Log.d("PermissionLauncher", "Permisos otorgados, iniciando sensor")
-            // Permisos otorgados, iniciar el sensor
-            if (sensor != null) {
-                sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
-                sensorActive.value = true
-                Log.d("PermissionLauncher", "Sensor de ritmo cardíaco iniciado después de otorgar permisos")
-            }
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val bodySensorsGranted = permissions[android.Manifest.permission.BODY_SENSORS] ?: false
+        val bluetoothGranted = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            permissions[android.Manifest.permission.BLUETOOTH_CONNECT] ?: false
         } else {
-            Log.w("PermissionLauncher", "Permisos denegados por el usuario")
+            true
+        }
+
+        if (bodySensorsGranted && bluetoothGranted) {
+            Log.d("PermissionLauncher", "Todos los permisos otorgados")
+            activateSensor()
+        } else {
+            Log.w("PermissionLauncher", "Algunos permisos fueron denegados")
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
-
         super.onCreate(savedInstanceState)
-
         setTheme(android.R.style.Theme_DeviceDefault)
 
         activityContext = this
 
-        // Inicializar sensor de ritmo cardíaco
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         sensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
 
@@ -122,7 +114,6 @@ class MainActivity : ComponentActivity(),
             Log.d("MainActivity", "Sensor de ritmo cardíaco encontrado: ${sensor?.name}")
         }
 
-        // Obtener el nodeID del dispositivo conectado
         getConnectedNodes()
 
         setContent {
@@ -138,6 +129,7 @@ class MainActivity : ComponentActivity(),
     private fun getConnectedNodes() {
         launch(Dispatchers.Default) {
             try {
+                delay(500)
                 val nodeList = Wearable.getNodeClient(activityContext!!).connectedNodes
                 val nodes = Tasks.await(nodeList)
 
@@ -145,103 +137,142 @@ class MainActivity : ComponentActivity(),
                     nodeID = nodes[0].id
                     Log.d("getConnectedNodes", "NodeID obtenido: $nodeID")
                     for (node in nodes) {
-                        Log.d("getConnectedNodes", "Nodo conectado: ${node.displayName} - ID: ${node.id}")
+                        Log.d("getConnectedNodes", "Nodo: ${node.displayName} - ID: ${node.id}")
                     }
                 } else {
-                    Log.w("getConnectedNodes", "No hay nodos conectados")
+                    Log.w("getConnectedNodes", "No hay nodos conectados, reintentando...")
+                    delay(2000)
+                    getConnectedNodes()
                 }
             } catch (e: Exception) {
-                Log.e("getConnectedNodes", "Error al obtener nodos: ${e.message}", e)
+                Log.e("getConnectedNodes", "Error: ${e.message}", e)
             }
         }
     }
 
     private fun sendData() {
-        // Actualizar la UI con la lectura actual del sensor
-        displayedHeartRate.value = currentSensorReading
-        Log.d("sendData", "Actualizando UI con BPM: ${currentSensorReading}")
+        if (currentSensorReading == 0) {
+            Log.w("sendData", "No hay lectura del sensor disponible")
+            return
+        }
 
-        // Enviar datos al celular
+        displayedHeartRate.value = currentSensorReading
+        Log.d("sendData", "Actualizando UI con BPM: $currentSensorReading")
+
         if (nodeID.isNotEmpty()) {
             sendMessage()
         } else {
-            Log.w("sendData", "nodeID no está inicializado. Intentando obtenerlo nuevamente...")
+            Log.w("sendData", "nodeID vacío, obteniendo nodos...")
             getConnectedNodes()
         }
     }
 
-    private fun sendMessage(){
+    private fun sendMessage() {
         val mensaje = "BPM:${currentSensorReading}"
         Wearable.getMessageClient(activityContext!!)
             .sendMessage(nodeID, PAYLOAD, mensaje.toByteArray())
             .addOnSuccessListener {
-                Log.d("sendMessage", "Mensaje enviado con éxito: $mensaje")
+                Log.d("sendMessage", "Mensaje enviado: $mensaje")
             }
             .addOnFailureListener { exception ->
-                Log.e("sendMessage", "Error al enviar mensaje: ${exception.message}", exception)
+                Log.e("sendMessage", "Error: ${exception.message}", exception)
             }
     }
 
     override fun onPause() {
         super.onPause()
         try {
-            Wearable.getDataClient(activityContext!!).removeListener (this)
-            Wearable.getMessageClient(activityContext!!).removeListener (this)
-            Wearable.getCapabilityClient(activityContext!!).removeListener (this)
-            sensorManager.unregisterListener(this)
-        }catch (e: Exception){
-            Log.e("onPause", "Error en onPause: ${e.message}", e)
+            Wearable.getDataClient(activityContext!!).removeListener(this)
+            Wearable.getMessageClient(activityContext!!).removeListener(this)
+            Wearable.getCapabilityClient(activityContext!!).removeListener(this)
+            if (sensorActive.value) {
+                sensorManager.unregisterListener(this)
+            }
+        } catch (e: Exception) {
+            Log.e("onPause", "Error: ${e.message}", e)
         }
     }
 
     override fun onResume() {
         super.onResume()
         try {
-            Wearable.getDataClient(activityContext!!).addListener (this)
-            Wearable.getMessageClient(activityContext!!).addListener (this)
+            Wearable.getDataClient(activityContext!!).addListener(this)
+            Wearable.getMessageClient(activityContext!!).addListener(this)
             Wearable.getCapabilityClient(activityContext!!)
-                .addListener (this, Uri.parse("wear://"), CapabilityClient.FILTER_REACHABLE)
-        }catch (e: Exception){
-            Log.e("onResume", "Error en onResume: ${e.message}", e)
+                .addListener(this, Uri.parse("wear://"), CapabilityClient.FILTER_REACHABLE)
+
+            if (sensorActive.value && sensor != null) {
+                sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+            }
+        } catch (e: Exception) {
+            Log.e("onResume", "Error: ${e.message}", e)
         }
     }
 
     override fun onDataChanged(p0: DataEventBuffer) {
-
+        // No utilizado
     }
 
     override fun onMessageReceived(p0: MessageEvent) {
-
+        // No utilizado
     }
 
     override fun onCapabilityChanged(p0: CapabilityInfo) {
-
+        // No utilizado
     }
 
-    private fun startSensor(){
-        if(ContextCompat.checkSelfPermission(this, android.Manifest.permission.BODY_SENSORS)
-            != PackageManager.PERMISSION_GRANTED){
-            Log.d("startSensor", "Solicitando permisos de sensor corporal")
-            requestPermissionLauncher.launch(android.Manifest.permission.BODY_SENSORS)
+    private fun startSensor() {
+        val permissionsToRequest = mutableListOf<String>()
+
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.BODY_SENSORS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionsToRequest.add(android.Manifest.permission.BODY_SENSORS)
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                permissionsToRequest.add(android.Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            Log.d("startSensor", "Solicitando permisos: $permissionsToRequest")
+            requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
             return
         }
-        if (sensor!=null){
-            sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
-            sensorActive.value = true
-            Log.d("startSensor", "Sensor de ritmo cardíaco iniciado")
+
+        activateSensor()
+    }
+
+    private fun activateSensor() {
+        if (sensor != null) {
+            val registered = sensorManager.registerListener(
+                this,
+                sensor,
+                SensorManager.SENSOR_DELAY_NORMAL
+            )
+            if (registered) {
+                sensorActive.value = true
+                Log.d("activateSensor", "Sensor iniciado exitosamente")
+            } else {
+                Log.e("activateSensor", "No se pudo registrar el listener")
+            }
         } else {
-            Log.e("startSensor", "Sensor no disponible")
+            Log.e("activateSensor", "Sensor no disponible")
         }
     }
 
     override fun onAccuracyChanged(p0: Sensor?, p1: Int) {
-        Log.d("onAccuracyChanged", "Precisión del sensor cambiada a: $p1")
+        Log.d("onAccuracyChanged", "Precisión: $p1")
     }
 
     override fun onSensorChanged(SE: SensorEvent?) {
-        if (SE?.sensor?.type==sensorType){
+        if (SE?.sensor?.type == sensorType) {
             currentSensorReading = SE.values[0].toInt()
-            Log.d("onSensorChanged", "Lectura del sensor: ${currentSensorReading} bpm")
+            Log.d("onSensorChanged", "Lectura: $currentSensorReading bpm")
         }
     }
 }
@@ -290,7 +321,7 @@ fun ClockView(
             currentTime = timeFormat.format(now)
             currentDate = dateFormat.format(now)
 
-            delay(1000L) // Actualizar cada segundo
+            delay(1000L)
         }
     }
 
@@ -301,7 +332,6 @@ fun ClockView(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // Ritmo cardíaco
         Text(
             text = if (heartRate > 0) "$heartRate" else "--",
             fontSize = 42.sp,
@@ -317,7 +347,6 @@ fun ClockView(
             modifier = Modifier.padding(bottom = 8.dp)
         )
 
-        // Hora y fecha
         Text(
             text = currentTime,
             fontSize = 16.sp,
@@ -333,18 +362,19 @@ fun ClockView(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        // Botones
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(top = 4.dp)
         ) {
-            // Botón Iniciar Sensor
             Button(
                 onClick = onStartSensor,
                 enabled = !sensorActive,
                 modifier = Modifier.size(width = 70.dp, height = 32.dp),
                 colors = ButtonDefaults.buttonColors(
-                    backgroundColor = if (sensorActive) MaterialTheme.colors.surface else MaterialTheme.colors.primary
+                    backgroundColor = if (sensorActive)
+                        MaterialTheme.colors.surface
+                    else
+                        MaterialTheme.colors.primary
                 )
             ) {
                 Text(
@@ -353,7 +383,6 @@ fun ClockView(
                 )
             }
 
-            // Botón Enviar
             Button(
                 onClick = onSendData,
                 enabled = sensorActive,
