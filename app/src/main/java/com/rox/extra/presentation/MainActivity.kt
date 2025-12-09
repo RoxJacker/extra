@@ -37,7 +37,9 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.wear.compose.material.Button
 import androidx.wear.compose.material.ButtonDefaults
 import androidx.wear.compose.material.MaterialTheme
@@ -84,8 +86,21 @@ class MainActivity : ComponentActivity(),
     // Estado del sensor
     private val sensorActive = mutableStateOf(false)
 
-    companion object {
-        private const val PERMISSION_REQUEST_CODE = 1001
+    // Launcher moderno para solicitar permisos
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            Log.d("PermissionLauncher", "Permisos otorgados, iniciando sensor")
+            // Permisos otorgados, iniciar el sensor
+            if (sensor != null) {
+                sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+                sensorActive.value = true
+                Log.d("PermissionLauncher", "Sensor de ritmo cardíaco iniciado después de otorgar permisos")
+            }
+        } else {
+            Log.w("PermissionLauncher", "Permisos denegados por el usuario")
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -204,10 +219,10 @@ class MainActivity : ComponentActivity(),
     }
 
     private fun startSensor(){
-        if(ActivityCompat.checkSelfPermission(this, android.Manifest.permission.BODY_SENSORS)
+        if(ContextCompat.checkSelfPermission(this, android.Manifest.permission.BODY_SENSORS)
             != PackageManager.PERMISSION_GRANTED){
             Log.d("startSensor", "Solicitando permisos de sensor corporal")
-            ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.BODY_SENSORS), PERMISSION_REQUEST_CODE)
+            requestPermissionLauncher.launch(android.Manifest.permission.BODY_SENSORS)
             return
         }
         if (sensor!=null){
@@ -216,29 +231,6 @@ class MainActivity : ComponentActivity(),
             Log.d("startSensor", "Sensor de ritmo cardíaco iniciado")
         } else {
             Log.e("startSensor", "Sensor no disponible")
-        }
-    }
-
-    // Callback para manejar la respuesta del usuario a la solicitud de permisos
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-
-        if (requestCode == PERMISSION_REQUEST_CODE) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                Log.d("onRequestPermissionsResult", "Permisos otorgados, iniciando sensor")
-                // Permisos otorgados, iniciar el sensor
-                if (sensor != null) {
-                    sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
-                    sensorActive.value = true
-                    Log.d("onRequestPermissionsResult", "Sensor de ritmo cardíaco iniciado después de otorgar permisos")
-                }
-            } else {
-                Log.w("onRequestPermissionsResult", "Permisos denegados por el usuario")
-            }
         }
     }
 
