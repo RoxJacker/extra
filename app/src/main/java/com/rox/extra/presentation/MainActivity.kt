@@ -13,11 +13,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -37,6 +43,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import androidx.core.app.ActivityCompat
+import androidx.wear.compose.material.Button
+import androidx.wear.compose.material.ButtonDefaults
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
@@ -64,10 +72,17 @@ class MainActivity : ComponentActivity(),
     private var sensor: Sensor?=null
     private var sensorType=Sensor.TYPE_HEART_RATE
 
-    lateinit var nodeID: String
-    private lateinit var PAYLOAD: String
+    var nodeID: String = ""
+    private var PAYLOAD: String = ""
 
-    private val heartRate = mutableStateOf(0)
+    // Lectura temporal del sensor (no se muestra hasta presionar Enviar)
+    private var currentSensorReading = 0
+
+    // Valor mostrado en la UI (solo se actualiza al presionar Enviar)
+    private val displayedHeartRate = mutableStateOf(0)
+
+    // Estado del sensor
+    private val sensorActive = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -86,19 +101,35 @@ class MainActivity : ComponentActivity(),
             Log.e("MainActivity", "No se encontró sensor de ritmo cardíaco")
         }
 
-        // Iniciar sensor
-        startSensor()
-
         setContent {
-            WearApp(heartRate.value)
+            WearApp(
+                heartRate = displayedHeartRate.value,
+                sensorActive = sensorActive.value,
+                onStartSensor = { startSensor() },
+                onSendData = { sendData() }
+            )
+        }
+    }
+
+    private fun sendData() {
+        // Actualizar la UI con la lectura actual del sensor
+        displayedHeartRate.value = currentSensorReading
+        Log.d("sendData", "Actualizando UI con BPM: ${currentSensorReading}")
+
+        // Enviar datos al celular
+        if (nodeID.isNotEmpty()) {
+            sendMessage()
+        } else {
+            Log.w("sendData", "nodeID no está inicializado. No se puede enviar mensaje.")
         }
     }
 
     private fun sendMessage(){
-        val sendMessage= Wearable.getMessageClient(activityContext!!)
-            .sendMessage(nodeID, PAYLOAD, "mensaje aenviar".toByteArray())
+        val mensaje = "BPM:${currentSensorReading}"
+        Wearable.getMessageClient(activityContext!!)
+            .sendMessage(nodeID, PAYLOAD, mensaje.toByteArray())
             .addOnSuccessListener {
-                Log.d("sendMessage", "Mesnaje envisdo con éxito")
+                Log.d("sendMessage", "Mensaje enviado con éxito: $mensaje")
             }
             .addOnFailureListener { exception ->
                 Log.d("sendMessage", "Error al enviar mensaje ${exception.message}")
@@ -124,7 +155,6 @@ class MainActivity : ComponentActivity(),
             Wearable.getMessageClient(activityContext!!).addListener (this)
             Wearable.getCapabilityClient(activityContext!!)
                 .addListener (this, Uri.parse("wear://"), CapabilityClient.FILTER_REACHABLE)
-            startSensor()
         }catch (e: Exception){
             Log.d("onResume", e.toString())
         }
@@ -150,6 +180,10 @@ class MainActivity : ComponentActivity(),
         }
         if (sensor!=null){
             sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+            sensorActive.value = true
+            Log.d("startSensor", "Sensor de ritmo cardíaco iniciado")
+        } else {
+            Log.e("startSensor", "Sensor no disponible")
         }
     }
 
@@ -159,15 +193,19 @@ class MainActivity : ComponentActivity(),
 
     override fun onSensorChanged(SE: SensorEvent?) {
         if (SE?.sensor?.type==sensorType){
-            val lectura=SE.values[0].toInt()
-            Log.d("onSensorChanged", "Ritmo cardíaco: ${lectura} bpm")
-            heartRate.value = lectura
+            currentSensorReading = SE.values[0].toInt()
+            Log.d("onSensorChanged", "Lectura del sensor: ${currentSensorReading} bpm (no mostrado aún)")
         }
     }
 }
 
 @Composable
-fun WearApp(heartRate: Int) {
+fun WearApp(
+    heartRate: Int,
+    sensorActive: Boolean,
+    onStartSensor: () -> Unit,
+    onSendData: () -> Unit
+) {
     ExtraTheme {
         Box(
             modifier = Modifier
@@ -176,13 +214,23 @@ fun WearApp(heartRate: Int) {
             contentAlignment = Alignment.Center
         ) {
             TimeText()
-            ClockView(heartRate)
+            ClockView(
+                heartRate = heartRate,
+                sensorActive = sensorActive,
+                onStartSensor = onStartSensor,
+                onSendData = onSendData
+            )
         }
     }
 }
 
 @Composable
-fun ClockView(heartRate: Int) {
+fun ClockView(
+    heartRate: Int,
+    sensorActive: Boolean,
+    onStartSensor: () -> Unit,
+    onSendData: () -> Unit
+) {
     var currentTime by remember { mutableStateOf("") }
     var currentDate by remember { mutableStateOf("") }
 
@@ -202,43 +250,77 @@ fun ClockView(heartRate: Int) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(horizontal = 8.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+        verticalArrangement = Arrangement.Center
     ) {
         // Ritmo cardíaco
         Text(
             text = if (heartRate > 0) "$heartRate" else "--",
-            fontSize = 48.sp,
+            fontSize = 42.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colors.primary,
             textAlign = TextAlign.Center
         )
         Text(
             text = "BPM",
-            fontSize = 16.sp,
+            fontSize = 14.sp,
             color = MaterialTheme.colors.onBackground,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(bottom = 16.dp)
+            modifier = Modifier.padding(bottom = 8.dp)
         )
 
-        // Hora
+        // Hora y fecha
         Text(
             text = currentTime,
-            fontSize = 24.sp,
+            fontSize = 16.sp,
             fontWeight = FontWeight.Normal,
             color = MaterialTheme.colors.onBackground,
             textAlign = TextAlign.Center
         )
-
-        // Fecha
         Text(
             text = currentDate,
-            fontSize = 12.sp,
+            fontSize = 10.sp,
             color = MaterialTheme.colors.onBackground,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 4.dp)
+            modifier = Modifier.padding(bottom = 12.dp)
         )
+
+        // Botones
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 4.dp)
+        ) {
+            // Botón Iniciar Sensor
+            Button(
+                onClick = onStartSensor,
+                enabled = !sensorActive,
+                modifier = Modifier.size(width = 70.dp, height = 32.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = if (sensorActive) MaterialTheme.colors.surface else MaterialTheme.colors.primary
+                )
+            ) {
+                Text(
+                    text = if (sensorActive) "ON" else "Sensor",
+                    fontSize = 10.sp
+                )
+            }
+
+            // Botón Enviar
+            Button(
+                onClick = onSendData,
+                enabled = sensorActive,
+                modifier = Modifier.size(width = 70.dp, height = 32.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = MaterialTheme.colors.primary
+                )
+            ) {
+                Text(
+                    text = "Enviar",
+                    fontSize = 10.sp
+                )
+            }
+        }
     }
 }
 
@@ -246,6 +328,11 @@ fun ClockView(heartRate: Int) {
 @Composable
 fun DefaultPreview() {
     ExtraTheme {
-        ClockView(heartRate = 75)
+        ClockView(
+            heartRate = 75,
+            sensorActive = true,
+            onStartSensor = {},
+            onSendData = {}
+        )
     }
 }
