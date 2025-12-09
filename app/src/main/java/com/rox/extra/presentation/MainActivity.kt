@@ -58,7 +58,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity(),
     CoroutineScope by MainScope(),
@@ -156,8 +155,7 @@ class MainActivity : ComponentActivity(),
             return
         }
 
-        displayedHeartRate.value = currentSensorReading
-        Log.d("sendData", "Actualizando UI con BPM: $currentSensorReading")
+        Log.d("sendData", "Enviando BPM: $currentSensorReading")
 
         if (nodeID.isNotEmpty()) {
             sendMessage()
@@ -209,17 +207,11 @@ class MainActivity : ComponentActivity(),
         }
     }
 
-    override fun onDataChanged(p0: DataEventBuffer) {
-        // No utilizado
-    }
+    override fun onDataChanged(p0: DataEventBuffer) {}
 
-    override fun onMessageReceived(p0: MessageEvent) {
-        // No utilizado
-    }
+    override fun onMessageReceived(p0: MessageEvent) {}
 
-    override fun onCapabilityChanged(p0: CapabilityInfo) {
-        // No utilizado
-    }
+    override fun onCapabilityChanged(p0: CapabilityInfo) {}
 
     private fun startSensor() {
         val permissionsToRequest = mutableListOf<String>()
@@ -272,6 +264,8 @@ class MainActivity : ComponentActivity(),
     override fun onSensorChanged(SE: SensorEvent?) {
         if (SE?.sensor?.type == sensorType) {
             currentSensorReading = SE.values[0].toInt()
+            // Actualizar UI en tiempo real
+            displayedHeartRate.value = currentSensorReading
             Log.d("onSensorChanged", "Lectura: $currentSensorReading bpm")
         }
     }
