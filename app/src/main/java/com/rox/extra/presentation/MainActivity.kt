@@ -62,10 +62,12 @@ class MainActivity : ComponentActivity(),
 
     private lateinit var sensorManager: SensorManager
     private var sensor: Sensor?=null
-    private var sensorType=Sensor.TYPE_GYROSCOPE
+    private var sensorType=Sensor.TYPE_HEART_RATE
 
     lateinit var nodeID: String
     private lateinit var PAYLOAD: String
+
+    private val heartRate = mutableStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -74,8 +76,21 @@ class MainActivity : ComponentActivity(),
 
         setTheme(android.R.style.Theme_DeviceDefault)
 
+        activityContext = this
+
+        // Inicializar sensor de ritmo cardíaco
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        sensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
+
+        if (sensor == null) {
+            Log.e("MainActivity", "No se encontró sensor de ritmo cardíaco")
+        }
+
+        // Iniciar sensor
+        startSensor()
+
         setContent {
-            WearApp("Android")
+            WearApp(heartRate.value)
         }
     }
 
@@ -109,6 +124,7 @@ class MainActivity : ComponentActivity(),
             Wearable.getMessageClient(activityContext!!).addListener (this)
             Wearable.getCapabilityClient(activityContext!!)
                 .addListener (this, Uri.parse("wear://"), CapabilityClient.FILTER_REACHABLE)
+            startSensor()
         }catch (e: Exception){
             Log.d("onResume", e.toString())
         }
@@ -143,14 +159,15 @@ class MainActivity : ComponentActivity(),
 
     override fun onSensorChanged(SE: SensorEvent?) {
         if (SE?.sensor?.type==sensorType){
-            val lectura=SE.values[0]
-            Log.d("onSensorChanged", "lectura: ${lectura}")
+            val lectura=SE.values[0].toInt()
+            Log.d("onSensorChanged", "Ritmo cardíaco: ${lectura} bpm")
+            heartRate.value = lectura
         }
     }
 }
 
 @Composable
-fun WearApp(greetingName: String) {
+fun WearApp(heartRate: Int) {
     ExtraTheme {
         Box(
             modifier = Modifier
@@ -159,13 +176,13 @@ fun WearApp(greetingName: String) {
             contentAlignment = Alignment.Center
         ) {
             TimeText()
-            ClockView()
+            ClockView(heartRate)
         }
     }
 }
 
 @Composable
-fun ClockView() {
+fun ClockView(heartRate: Int) {
     var currentTime by remember { mutableStateOf("") }
     var currentDate by remember { mutableStateOf("") }
 
@@ -189,19 +206,38 @@ fun ClockView() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
     ) {
+        // Ritmo cardíaco
         Text(
-            text = currentTime,
-            fontSize = 32.sp,
+            text = if (heartRate > 0) "$heartRate" else "--",
+            fontSize = 48.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colors.primary,
             textAlign = TextAlign.Center
         )
         Text(
-            text = currentDate,
-            fontSize = 14.sp,
+            text = "BPM",
+            fontSize = 16.sp,
             color = MaterialTheme.colors.onBackground,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 8.dp)
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        // Hora
+        Text(
+            text = currentTime,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Normal,
+            color = MaterialTheme.colors.onBackground,
+            textAlign = TextAlign.Center
+        )
+
+        // Fecha
+        Text(
+            text = currentDate,
+            fontSize = 12.sp,
+            color = MaterialTheme.colors.onBackground,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 4.dp)
         )
     }
 }
@@ -210,6 +246,6 @@ fun ClockView() {
 @Composable
 fun DefaultPreview() {
     ExtraTheme {
-        ClockView()
+        ClockView(heartRate = 75)
     }
 }
